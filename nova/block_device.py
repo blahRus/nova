@@ -146,3 +146,18 @@ def match_device(device):
     if not match:
         return None
     return match.groups()
+
+def next_dev_name(bus_hint, used_devs):
+    if bus_hint:
+        match = match_device(bus_hint)
+    if match:
+        prefix = strip_dev(match[0])
+    else:
+        prefix = FLAGS.libvirt_disk_prefix or 'vd'
+    plain_devs = [strip_dev(dev) for dev in used_devs]
+    letters_used = [dev[len(prefix):len(prefix)+1] \
+                        for dev in plain_devs if dev.startswith(prefix)]
+    for i in range(26):
+        char = chr(ord('a') + i)
+        if char not in letters_used:
+            return prefix + char
