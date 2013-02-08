@@ -1670,7 +1670,7 @@ class API(base.Base):
         # hence the zero size
         image_meta['size'] = 0
 
-        return self.image_service.create(context, image_meta, data='')
+        return None
 
     def _get_minram_mindisk_params(self, context, instance):
         try:

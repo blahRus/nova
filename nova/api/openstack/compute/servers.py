@@ -1346,20 +1346,21 @@ class Controller(wsgi.Controller):
         instance = self._get_server(context, req, id)
 
         bdms = self.compute_api.get_instance_bdms(context, instance)
+        volume_backed = False
 
         try:
             if self.compute_api.is_volume_backed_instance(context, instance,
                                                           bdms):
+                volume_backed = True
                 img = instance['image_ref']
                 src_image = self.compute_api.image_service.show(context, img)
                 image_meta = dict(src_image)
 
-                image = self.compute_api.snapshot_volume_backed(
-                                                       context,
-                                                       instance,
-                                                       image_meta,
-                                                       image_name,
-                                                       extra_properties=props)
+                self.compute_api.snapshot_volume_backed(context,
+                                                        instance,
+                                                        image_meta,
+                                                        image_name,
+                                                        extra_properties=props)
             else:
                 image = self.compute_api.snapshot(context,
                                                   instance,
@@ -1371,15 +1372,19 @@ class Controller(wsgi.Controller):
         except exception.Invalid as err:
             raise exc.HTTPBadRequest(explanation=str(err))
 
-        # build location of newly-created image entity
-        image_id = str(image['id'])
-        image_ref = os.path.join(req.application_url,
-                                 context.project_id,
-                                 'images',
-                                 image_id)
-
         resp = webob.Response(status_int=202)
-        resp.headers['Location'] = image_ref
+        if not volume_backed:
+            # build location of newly-created image entity
+            image_id = str(image['id'])
+            image_ref = os.path.join(req.application_url,
+                                     context.project_id,
+                                     'images',
+                                     image_id)
+            resp.headers['Location'] = image_ref
+        else:
+            resp.headers['Location'] = os.path.join(req.application_url,
+                                                    context.project_id,
+                                                    'snapshots')
         return resp
 
     def _get_server_admin_password(self, server):
