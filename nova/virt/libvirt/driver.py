@@ -1346,63 +1346,6 @@ class LibvirtDriver(driver.ComputeDriver):
         if size == 0 or suffix == '.rescue':
             size = None
 
-        if not self._volume_in_mapping(self.default_root_device,
-                                       block_device_info):
-            image('disk').cache(fetch_func=libvirt_utils.fetch_image,
-                                context=context,
-                                filename=root_fname,
-                                size=size,
-                                image_id=disk_images['image_id'],
-                                user_id=instance['user_id'],
-                                project_id=instance['project_id'])
-
-        ephemeral_gb = instance['ephemeral_gb']
-        if ephemeral_gb and not self._volume_in_mapping(
-                self.default_second_device, block_device_info):
-            swap_device = self.default_third_device
-            fn = functools.partial(self._create_ephemeral,
-                                   fs_label='ephemeral0',
-                                   os_type=instance["os_type"])
-            fname = "ephemeral_%s_%s_%s" % ("0",
-                                            ephemeral_gb,
-                                            instance["os_type"])
-            size = ephemeral_gb * 1024 * 1024 * 1024
-            image('disk.local').cache(fetch_func=fn,
-                                      filename=fname,
-                                      size=size,
-                                      ephemeral_size=ephemeral_gb)
-        else:
-            swap_device = self.default_second_device
-
-        for eph in driver.block_device_info_get_ephemerals(block_device_info):
-            fn = functools.partial(self._create_ephemeral,
-                                   fs_label='ephemeral%d' % eph['num'],
-                                   os_type=instance["os_type"])
-            size = eph['size'] * 1024 * 1024 * 1024
-            fname = "ephemeral_%s_%s_%s" % (eph['num'],
-                                            eph['size'],
-                                            instance["os_type"])
-            image(_get_eph_disk(eph)).cache(fetch_func=fn,
-                                            filename=fname,
-                                            size=size,
-                                            ephemeral_size=eph['size'])
-
-        swap_mb = 0
-
-        swap = driver.block_device_info_get_swap(block_device_info)
-        if driver.swap_is_usable(swap):
-            swap_mb = swap['swap_size']
-        elif (inst_type['swap'] > 0 and
-              not self._volume_in_mapping(swap_device, block_device_info)):
-            swap_mb = inst_type['swap']
-
-        if swap_mb > 0:
-            size = swap_mb * 1024 * 1024
-            image('disk.swap').cache(fetch_func=self._create_swap,
-                                     filename="swap_%s" % swap_mb,
-                                     size=size,
-                                     swap_mb=swap_mb)
-
         # target partition for file injection
         target_partition = None
         if not instance['kernel_id']:
@@ -1633,50 +1576,6 @@ class LibvirtDriver(driver.ComputeDriver):
                                        bus,
                                        root_device_type)
                     devices.append(diskos)
-
-                ephemeral_device = None
-                if not (self._volume_in_mapping(self.default_second_device,
-                                                block_device_info) or
-                        0 in [eph['num'] for eph in
-                              driver.block_device_info_get_ephemerals(
-                            block_device_info)]):
-                    if instance['ephemeral_gb'] > 0:
-                        ephemeral_device = self.default_second_device
-
-                if ephemeral_device is not None:
-                    disklocal = disk_info('disk.local', ephemeral_device)
-                    devices.append(disklocal)
-
-                if ephemeral_device is not None:
-                    swap_device = self.default_third_device
-                    db.instance_update(
-                        nova_context.get_admin_context(), instance['uuid'],
-                        {'default_ephemeral_device':
-                             '/dev/' + self.default_second_device})
-                else:
-                    swap_device = self.default_second_device
-
-                for eph in driver.block_device_info_get_ephemerals(
-                    block_device_info):
-                    diskeph = disk_info(_get_eph_disk(eph),
-                                        block_device.strip_dev(
-                            eph['device_name']))
-                    devices.append(diskeph)
-
-                swap = driver.block_device_info_get_swap(block_device_info)
-                if driver.swap_is_usable(swap):
-                    diskswap = disk_info('disk.swap',
-                                         block_device.strip_dev(
-                            swap['device_name']))
-                    devices.append(diskswap)
-                elif (inst_type['swap'] > 0 and
-                      not self._volume_in_mapping(swap_device,
-                                                  block_device_info)):
-                    diskswap = disk_info('disk.swap', swap_device)
-                    devices.append(diskswap)
-                    db.instance_update(
-                        nova_context.get_admin_context(), instance['uuid'],
-                        {'default_swap_device': '/dev/' + swap_device})
 
                 for vol in block_device_mapping:
                     connection_info = vol['connection_info']
