@@ -36,6 +36,7 @@ terminating it.
 
 import contextlib
 import functools
+import math
 import socket
 import sys
 import time
@@ -416,20 +417,6 @@ class ComputeManager(manager.SchedulerDependentManager):
 
             if bdm['no_device']:
                 continue
-            if bdm['virtual_name']:
-                virtual_name = bdm['virtual_name']
-                device_name = bdm['device_name']
-                assert block_device.is_swap_or_ephemeral(virtual_name)
-                if virtual_name == 'swap':
-                    swap = {'device_name': device_name,
-                            'swap_size': bdm['volume_size']}
-                elif block_device.is_ephemeral(virtual_name):
-                    eph = {'num': block_device.ephemeral_num(virtual_name),
-                           'virtual_name': virtual_name,
-                           'device_name': device_name,
-                           'size': bdm['volume_size']}
-                    ephemerals.append(eph)
-                continue
 
             if ((bdm['snapshot_id'] is not None) and
                 (bdm['volume_id'] is None)):
@@ -496,6 +483,7 @@ class ComputeManager(manager.SchedulerDependentManager):
                             requested_networks)
                     block_device_info = self._prep_block_device(context,
                             instance)
+                    LOG.debug('block_device_info = %s', block_device_info)
                     instance = self._spawn(context, instance, image_meta,
                                            network_info, block_device_info,
                                            injected_files, admin_password)
@@ -727,12 +715,113 @@ class ComputeManager(manager.SchedulerDependentManager):
 
         return network_info
 
+    def _wait_for_status(self, context, timeout, prep_statuses, end_status,
+                         func, *args, **kwargs):
+        end = time.time() + timeout
+        while True:
+            result = func(*args, **kwargs)
+            if result['status'] not in prep_statuses or (timeout and
+                                                         time.time() > end):
+                break
+            greenthread.sleep(1)
+
+        if result['status'] in prep_statuses:
+            raise exception.TimedOut()
+        elif result['status'] != end_status:
+            expected = prep_statuses + [end_status]
+            raise exception.UnexpectedStatus(expected=expected,
+                                             actual=result['status'])
+        return result
+
+    def _sync_create_volume(self, context, size, name=None, description=None,
+                            image_id=None):
+        volume = self.volume_api.create(context, size, name, description,
+                                        image_id=image_id)
+        try:
+            return self._wait_for_status(context, FLAGS.block_dev_setup_timeout,
+                                         ['creating', 'downloading'],
+                                         'available',
+                                         self.volume_api.get,
+                                         context, volume['id'])
+        except exception.TimedOut:
+            msg = _('Failed to create volume %s from image %s')
+            LOG.debug(msg, volume['id'], image_id)
+            raise
+
+    def _replace_local_disks_with_volumes(self, context, instance):
+        LOG.debug('replacing local disks')
+        instance_type_id = instance['instance_type_id']
+        instance_type = instance_types.get_instance_type(instance_type_id)
+        instance_uuid = instance['uuid']
+
+        image_ref = instance['image_ref']
+        used_devices = []
+        if image_ref:
+            (image_service, image_id) = glance.get_remote_image_service(
+                context, instance['image_ref'])
+            image = image_service.show(context, image_id)
+            # root device
+            size = instance_type['root_gb']
+            if not size:
+                size = int(math.ceil(float(image['size']) / 1024**3))
+            vol = self._sync_create_volume(context, size,
+                                           'auto-created root',
+                                           'root for ' + instance_uuid,
+                                           image_id=image['id'])
+            root_device = (FLAGS.libvirt_disk_prefix or 'vd') + 'a'
+            properties = dict(instance_uuid=instance_uuid,
+                              device_name=root_device,
+                              delete_on_termination=True,
+                              volume_id=vol['id'],
+                              volume_size=vol['size'])
+            self.db.block_device_mapping_create(context, properties)
+            used_devices.append(root_device)
+            LOG.debug('added volume %s for root', vol)
+
+        bdms = self.db.block_device_mapping_get_all_by_instance(context,
+                                                                instance_uuid)
+        LOG.debug('len bdms = %s', len(bdms))
+
+        used_devices += [bdm['device_name'] for bdm in bdms if bdm['device_name']]
+        for mapping in bdms:
+            LOG.debug('mapping is %s', mapping)
+            # already a volume, or lack of device marker
+            if (mapping['volume_id'] or
+                mapping['snapshot_id'] or
+                mapping['no_device']):
+                continue
+
+            vname = mapping['virtual_name']
+            size = mapping['volume_size']
+            vol = self._sync_create_volume(context, size,
+                                           'auto-created ' + vname,
+                                           vname + ' for ' + instance_uuid)
+            hint = '/dev/' + (FLAGS.libvirt_disk_prefix or 'vd') + 'a'
+            if used_devices:
+                hint = used_devices[0]
+            device_name = mapping['device_name'] or \
+                block_device.next_dev_name(hint, used_devices)
+            used_devices.append(device_name)
+            properties = dict(instance_uuid=instance_uuid,
+                              device_name=device_name,
+                              delete_on_termination=True,
+                              virtual_name=vname,
+                              volume_id=vol['id'],
+                              volume_size=vol['size'])
+            self.db.block_device_mapping_update_or_create(context,
+                                                          properties)
+
     def _prep_block_device(self, context, instance):
         """Set up the block device for an instance with error logging"""
         self._instance_update(context, instance['uuid'],
                               vm_state=vm_states.BUILDING,
                               task_state=task_states.BLOCK_DEVICE_MAPPING)
         try:
+            if FLAGS.always_use_volumes:
+                LOG.debug('creating bdm for local disks')
+                self._replace_local_disks_with_volumes(context,
+                                                       instance)
+
             return self._setup_block_device_mapping(context, instance)
         except Exception:
             LOG.exception(_('Instance failed block device setup'),

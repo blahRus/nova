@@ -428,6 +428,12 @@ global_opts = [
     cfg.StrOpt('control_exchange',
                default='nova',
                help='AMQP exchange to connect to if using RabbitMQ or Qpid'),
+    cfg.BoolOpt('always_use_volumes',
+               default=False,
+               help='Whether to use volumes instead of local files for instances'),
+    cfg.IntOpt('block_dev_setup_timeout',
+               default=0,
+               help='How long to wait for block device creation when building an instance'),
 ]
 
 FLAGS.register_opts(global_opts)
