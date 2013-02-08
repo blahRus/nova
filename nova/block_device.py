@@ -28,7 +28,6 @@ _DEFAULT_MAPPINGS = {'ami': 'sda1',
                      'root': DEFAULT_ROOT_DEV_NAME,
                      'swap': 'sda3'}
 
-
 def properties_root_device_name(properties):
     """get root device name from image meta data.
     If it isn't specified, return None.
@@ -166,3 +165,20 @@ def volume_in_mapping(mount_device, block_device_info):
 
     LOG.debug(_("block_device_list %s"), block_device_list)
     return strip_dev(mount_device) in block_device_list
+
+
+def next_dev_name(bus_hint, used_devs):
+    if bus_hint:
+        match = match_device(bus_hint)
+    if match:
+        prefix = strip_dev(match[0])
+    else:
+        prefix = 'vd'
+    plain_devs = [strip_dev(dev) for dev in used_devs]
+    letters_used = [dev[len(prefix):len(prefix)+1] \
+                        for dev in plain_devs if dev.startswith(prefix)]
+    for i in range(26):
+        char = chr(ord('a') + i)
+        if char not in letters_used:
+            return prefix + char
+
