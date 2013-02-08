@@ -199,6 +199,12 @@ class GlanceConnectionFailed(NovaException):
     message = _("Connection to glance host %(host)s:%(port)s failed: "
         "%(reason)s")
 
+class TimedOut(NovaException):
+    message = _("Operation timed out.")
+
+class UnexpectedStatus(NovaException):
+    message = _("unexpected status: expecting one of %(expected)s but "
+                "the actual status is %(actual)s")
 
 class NotAuthorized(NovaException):
     message = _("Not authorized.")

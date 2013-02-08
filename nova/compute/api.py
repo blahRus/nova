@@ -804,7 +804,30 @@ class API(base.Base):
                     instance_type, instance_uuid, mappings)
 
         image_bdm = image_properties.get('block_device_mapping', [])
-        for mapping in (image_bdm, block_device_mapping):
+
+        # convert what would be local files to extra mappings
+        # at the beginning of the list, so they can be overridden
+        # by block_device_mappings added by the user, as the would
+        # be by the libvirt driver normally
+        extra_mappings = []
+        disk_prefix = 'vd'
+        if instance_type['ephemeral_gb'] > 0:
+            extra_mappings.append(
+                dict(delete_on_termination=True,
+                     virtual_name='ephemeral0',
+                     snapshot_id=None,
+                     volume_id=None,
+                     volume_size=instance_type['ephemeral_gb'],
+                     device_name=disk_prefix + 'b'))
+        if instance_type['swap'] > 0:
+            extra_mappings.append(
+                dict(delete_on_termination=True,
+                     virtual_name='swap',
+                     snapshot_id=None,
+                     volume_id=None,
+                     volume_size=instance_type['swap'],
+                     device_name=disk_prefix + 'c'))
+        for mapping in (extra_mappings, image_bdm, block_device_mapping):
             if not mapping:
                 continue
             self._update_block_device_mapping(context,
