@@ -1800,62 +1800,6 @@ class LibvirtDriver(driver.ComputeDriver):
             if size == 0 or suffix == '.rescue':
                 size = None
 
-            image('disk').cache(fetch_func=libvirt_utils.fetch_image,
-                                context=context,
-                                filename=root_fname,
-                                size=size,
-                                image_id=disk_images['image_id'],
-                                user_id=instance['user_id'],
-                                project_id=instance['project_id'])
-
-        # Lookup the filesystem type if required
-        os_type_with_default = instance['os_type']
-        if not os_type_with_default:
-            os_type_with_default = 'default'
-
-        ephemeral_gb = instance['ephemeral_gb']
-        if 'disk.local' in disk_mapping:
-            fn = functools.partial(self._create_ephemeral,
-                                   fs_label='ephemeral0',
-                                   os_type=instance["os_type"])
-            fname = "ephemeral_%s_%s" % (ephemeral_gb, os_type_with_default)
-            size = ephemeral_gb * 1024 * 1024 * 1024
-            image('disk.local').cache(fetch_func=fn,
-                                      filename=fname,
-                                      size=size,
-                                      ephemeral_size=ephemeral_gb)
-
-        for eph in driver.block_device_info_get_ephemerals(block_device_info):
-            fn = functools.partial(self._create_ephemeral,
-                                   fs_label='ephemeral%d' % eph['num'],
-                                   os_type=instance["os_type"])
-            size = eph['size'] * 1024 * 1024 * 1024
-            fname = "ephemeral_%s_%s" % (eph['size'], os_type_with_default)
-            image(blockinfo.get_eph_disk(eph)).cache(
-                fetch_func=fn,
-                filename=fname,
-                size=size,
-                ephemeral_size=eph['size'])
-
-        if 'disk.swap' in disk_mapping:
-            mapping = disk_mapping['disk.swap']
-            swap_mb = 0
-
-            swap = driver.block_device_info_get_swap(block_device_info)
-            if driver.swap_is_usable(swap):
-                swap_mb = swap['swap_size']
-            elif (inst_type['swap'] > 0 and
-                  not block_device.volume_in_mapping(
-                    mapping['dev'], block_device_info)):
-                swap_mb = inst_type['swap']
-
-            if swap_mb > 0:
-                size = swap_mb * 1024 * 1024
-                image('disk.swap').cache(fetch_func=self._create_swap,
-                                         filename="swap_%s" % swap_mb,
-                                         size=size,
-                                         swap_mb=swap_mb)
-
         # Config drive
         if configdrive.required_by(instance):
             LOG.info(_('Using config drive'), instance=instance)
@@ -2059,35 +2003,6 @@ class LibvirtDriver(driver.ComputeDriver):
                                                         disk_mapping,
                                                         inst_type)
                     devices.append(diskos)
-
-                if 'disk.local' in disk_mapping:
-                    disklocal = self.get_guest_disk_config(instance,
-                                                           'disk.local',
-                                                           disk_mapping,
-                                                           inst_type)
-                    devices.append(disklocal)
-                    self.virtapi.instance_update(
-                        nova_context.get_admin_context(), instance['uuid'],
-                        {'default_ephemeral_device':
-                             '/dev/' + disklocal.target_dev})
-
-                for eph in driver.block_device_info_get_ephemerals(
-                    block_device_info):
-                    diskeph = self.get_guest_disk_config(
-                        instance,
-                        blockinfo.get_eph_disk(eph),
-                        disk_mapping, inst_type)
-                    devices.append(diskeph)
-
-                if 'disk.swap' in disk_mapping:
-                    diskswap = self.get_guest_disk_config(instance,
-                                                          'disk.swap',
-                                                          disk_mapping,
-                                                          inst_type)
-                    devices.append(diskswap)
-                    self.virtapi.instance_update(
-                        nova_context.get_admin_context(), instance['uuid'],
-                        {'default_swap_device': '/dev/' + diskswap.target_dev})
 
                 for vol in block_device_mapping:
                     connection_info = vol['connection_info']
