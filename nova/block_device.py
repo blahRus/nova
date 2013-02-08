@@ -48,7 +48,7 @@ def properties_root_device_name(properties):
     return root_device_name
 
 
-_ephemeral = re.compile('^ephemeral(\d|[1-9]\d+)$')
+_ephemeral = re.compile('^ephemeral(\d|[0-9]\d+)$')
 
 
 def is_ephemeral(device_name):
