@@ -32,6 +32,9 @@ from nova.openstack.common import importutils
 from nova.openstack.common import log as logging
 from nova import test
 from nova import utils
+from nova.virt import fake
+from nova.virt import imagehandler
+from nova.virt.libvirt import driver as libvirt_driver
 from nova.virt.libvirt import imagecache
 from nova.virt.libvirt import utils as virtutils
 
@@ -61,6 +64,8 @@ class ImageCacheManagerTestCase(test.NoDBTestCase):
                                          'instance-00000002',
                                          'instance-00000003',
                                          'banana-42-hamster'])
+        imagehandler.load_image_handlers(libvirt_driver.LibvirtDriver(
+                                                  fake.FakeVirtAPI(), False))
 
     def test_read_stored_checksum_missing(self):
         self.stubs.Set(os.path, 'exists', lambda x: False)
@@ -380,7 +385,7 @@ class ImageCacheManagerTestCase(test.NoDBTestCase):
     def test_remove_base_file(self):
         with self._make_base_file() as fname:
             image_cache_manager = imagecache.ImageCacheManager()
-            image_cache_manager._remove_base_file(fname)
+            image_cache_manager._remove_base_file(None, fname)
             info_fname = imagecache.get_info_filename(fname)
 
             # Files are initially too new to delete
@@ -389,7 +394,7 @@ class ImageCacheManagerTestCase(test.NoDBTestCase):
 
             # Old files get cleaned up though
             os.utime(fname, (-1, time.time() - 3601))
-            image_cache_manager._remove_base_file(fname)
+            image_cache_manager._remove_base_file(None, fname)
 
             self.assertFalse(os.path.exists(fname))
             self.assertFalse(os.path.exists(info_fname))
@@ -398,7 +403,7 @@ class ImageCacheManagerTestCase(test.NoDBTestCase):
         with self._make_base_file() as fname:
             image_cache_manager = imagecache.ImageCacheManager()
             image_cache_manager.originals = [fname]
-            image_cache_manager._remove_base_file(fname)
+            image_cache_manager._remove_base_file(None, fname)
             info_fname = imagecache.get_info_filename(fname)
 
             # Files are initially too new to delete
@@ -407,14 +412,14 @@ class ImageCacheManagerTestCase(test.NoDBTestCase):
 
             # This file should stay longer than a resized image
             os.utime(fname, (-1, time.time() - 3601))
-            image_cache_manager._remove_base_file(fname)
+            image_cache_manager._remove_base_file(None, fname)
 
             self.assertTrue(os.path.exists(fname))
             self.assertTrue(os.path.exists(info_fname))
 
             # Originals don't stay forever though
             os.utime(fname, (-1, time.time() - 3600 * 25))
-            image_cache_manager._remove_base_file(fname)
+            image_cache_manager._remove_base_file(None, fname)
 
             self.assertFalse(os.path.exists(fname))
             self.assertFalse(os.path.exists(info_fname))
@@ -429,7 +434,7 @@ class ImageCacheManagerTestCase(test.NoDBTestCase):
 
             fname = os.path.join(tmpdir, 'aaa')
             image_cache_manager = imagecache.ImageCacheManager()
-            image_cache_manager._remove_base_file(fname)
+            image_cache_manager._remove_base_file(None, fname)
 
     def test_remove_base_file_oserror(self):
         with intercept_log_messages() as stream:
@@ -445,7 +450,7 @@ class ImageCacheManagerTestCase(test.NoDBTestCase):
 
                 # This will raise an OSError because of file permissions
                 image_cache_manager = imagecache.ImageCacheManager()
-                image_cache_manager._remove_base_file(fname)
+                image_cache_manager._remove_base_file(None, fname)
 
                 self.assertTrue(os.path.exists(fname))
                 self.assertNotEqual(stream.getvalue().find('Failed to remove'),
@@ -706,6 +711,12 @@ class ImageCacheManagerTestCase(test.NoDBTestCase):
             return
 
         self.stubs.Set(os, 'remove', lambda x: remove(x))
+
+        def fake_remove_image(*args, **kwargs):
+            return True
+
+        self.stubs.Set(imagehandler.default.DefaultImageHandler,
+                       '_remove_image', fake_remove_image)
 
         # And finally we can make the call we're actually testing...
         # The argument here should be a context, but it is mocked out

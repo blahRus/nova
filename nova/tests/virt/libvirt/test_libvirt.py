@@ -46,6 +46,7 @@ from nova.objects import instance as instance_obj
 from nova.openstack.common import fileutils
 from nova.openstack.common import importutils
 from nova.openstack.common import jsonutils
+from nova.openstack.common import lockutils
 from nova.openstack.common import loopingcall
 from nova.openstack.common import processutils
 from nova.openstack.common import uuidutils
@@ -62,6 +63,7 @@ from nova.virt import driver
 from nova.virt import event as virtevent
 from nova.virt import fake
 from nova.virt import firewall as base_firewall
+from nova.virt import imagehandler
 from nova.virt import images
 from nova.virt.libvirt import blockinfo
 from nova.virt.libvirt import config as vconfig
@@ -6312,6 +6314,10 @@ class NWFilterTestCase(test.TestCase):
 
 
 class LibvirtUtilsTestCase(test.TestCase):
+    def tearDown(self):
+        nova.tests.image.fake.FakeImageService_reset()
+        super(LibvirtUtilsTestCase, self).tearDown()
+
     def test_get_iscsi_initiator(self):
         self.mox.StubOutWithMock(utils, 'execute')
         initiator = 'fake.initiator.iqn'
@@ -6547,6 +6553,13 @@ disk size: 4.4M''', ''))
         def fake_rm_on_error(path, remove=None):
             self.executes.append(('rm', '-f', path))
 
+        def fake_exists(path):
+            self.executes.append(('test', '-f', path))
+            if path in ['t.qcow2', 't.raw']:
+                return True
+            else:
+                return False
+
         def fake_qemu_img_info(path):
             class FakeImgInfo(object):
                 pass
@@ -6566,12 +6579,23 @@ disk size: 4.4M''', ''))
 
             return FakeImgInfo()
 
+        def fake_get_locations(context, image_id):
+            return []
+
+        @contextlib.contextmanager
+        def fake_lockutils_lock(*args, **kwargs):
+            yield
+
+        nova.tests.image.fake.stub_out_image_service(self.stubs)
+
         self.stubs.Set(utils, 'execute', fake_execute)
         self.stubs.Set(os, 'rename', fake_rename)
         self.stubs.Set(os, 'unlink', fake_unlink)
+        self.stubs.Set(os.path, 'exists', fake_exists)
         self.stubs.Set(images, 'fetch', lambda *_: None)
         self.stubs.Set(images, 'qemu_img_info', fake_qemu_img_info)
         self.stubs.Set(fileutils, 'delete_if_exists', fake_rm_on_error)
+        self.stubs.Set(lockutils, 'lock', fake_lockutils_lock)
 
         # Since the remove param of fileutils.remove_path_on_error()
         # is initialized at load time, we must provide a wrapper
@@ -6579,6 +6603,12 @@ disk size: 4.4M''', ''))
         old_rm_path_on_error = fileutils.remove_path_on_error
         f = functools.partial(old_rm_path_on_error, remove=fake_rm_on_error)
         self.stubs.Set(fileutils, 'remove_path_on_error', f)
+
+        self.stubs.Set(nova.tests.image.fake.FakeImageService(),
+                       'get_locations', fake_get_locations)
+
+        imagehandler.load_image_handlers(libvirt_driver.LibvirtDriver(
+                                             fake.FakeVirtAPI(), False))
 
         context = 'opaque context'
         image_id = '4'
@@ -6589,20 +6619,28 @@ disk size: 4.4M''', ''))
         self.executes = []
         expected_commands = [('qemu-img', 'convert', '-O', 'raw',
                               't.qcow2.part', 't.qcow2.converted'),
-                             ('rm', 't.qcow2.part'),
-                             ('mv', 't.qcow2.converted', 't.qcow2')]
+                             ('mv', 't.qcow2.converted', 't.qcow2'),
+                             ('test', '-f', 't.qcow2'),
+                             ('test', '-f', 't.qcow2.converted'),
+                             ('rm', '-f', 't.qcow2.part'),
+                             ('test', '-f', 't.qcow2.part')]
+
         images.fetch_to_raw(context, image_id, target, user_id, project_id)
         self.assertEqual(self.executes, expected_commands)
 
         target = 't.raw'
         self.executes = []
-        expected_commands = [('mv', 't.raw.part', 't.raw')]
+        expected_commands = [('mv', 't.raw.part', 't.raw'),
+                             ('test', '-f', 't.raw'),
+                             ('test', '-f', 't.raw.part')]
         images.fetch_to_raw(context, image_id, target, user_id, project_id)
         self.assertEqual(self.executes, expected_commands)
 
         target = 'backing.qcow2'
         self.executes = []
-        expected_commands = [('rm', '-f', 'backing.qcow2.part')]
+        expected_commands = [('rm', '-f', 'backing.qcow2.part'),
+                             ('test', '-f', 'backing.qcow2.part'),
+                             ('rm', '-f', 'backing.qcow2.part')]
         self.assertRaises(exception.ImageUnacceptable,
                           images.fetch_to_raw,
                           context, image_id, target, user_id, project_id)

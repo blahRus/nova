@@ -37,6 +37,7 @@ from nova.openstack.common.gettextutils import _
 from nova.openstack.common import jsonutils
 from nova.openstack.common import log as logging
 from nova import utils
+from nova.virt import imagehandler
 from nova.virt.libvirt import utils as virtutils
 
 LOG = logging.getLogger(__name__)
@@ -453,7 +454,7 @@ class ImageCacheManager(object):
 
         return inner_verify_checksum()
 
-    def _remove_base_file(self, base_file):
+    def _remove_base_file(self, context, base_file):
         """Remove a single base file if it is old enough.
 
         Returns nothing.
@@ -476,7 +477,12 @@ class ImageCacheManager(object):
         else:
             LOG.info(_('Removing base file: %s'), base_file)
             try:
-                os.remove(base_file)
+                for (handler, loc) in imagehandler.handle_image(
+                                                    target_path=base_file):
+                    # The loop will stop when the handle function
+                    # return success.
+                    handler.remove_image(base_file,
+                                         context=context, location=loc)
                 signature = get_info_filename(base_file)
                 if os.path.exists(signature):
                     os.remove(signature)
@@ -617,7 +623,7 @@ class ImageCacheManager(object):
 
             if CONF.remove_unused_base_images:
                 for base_file in self.removable_base_files:
-                    self._remove_base_file(base_file)
+                    self._remove_base_file(context, base_file)
 
         # That's it
         LOG.debug(_('Verification complete'))

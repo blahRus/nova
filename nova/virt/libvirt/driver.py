@@ -4164,21 +4164,29 @@ class LibvirtDriver(driver.ComputeDriver):
         timer.start(interval=0.5).wait()
 
     def _fetch_instance_kernel_ramdisk(self, context, instance):
-        """Download kernel and ramdisk for instance in instance directory."""
-        instance_dir = libvirt_utils.get_instance_path(instance)
+        """Fetch kernel and ramdisk for instance."""
         if instance['kernel_id']:
-            libvirt_utils.fetch_image(context,
-                                      os.path.join(instance_dir, 'kernel'),
-                                      instance['kernel_id'],
-                                      instance['user_id'],
-                                      instance['project_id'])
+            disk_images = {'kernel_id': instance['kernel_id'],
+                           'ramdisk_id': instance['ramdisk_id']}
+
+            image = self.image_backend.image(instance, 'kernel', 'raw')
+            fname = imagecache.get_cache_fname(disk_images, 'kernel_id')
+            image.cache(fetch_func=libvirt_utils.fetch_image,
+                                context=context,
+                                filename=fname,
+                                image_id=disk_images['kernel_id'],
+                                user_id=instance['user_id'],
+                                project_id=instance['project_id'])
+
             if instance['ramdisk_id']:
-                libvirt_utils.fetch_image(context,
-                                          os.path.join(instance_dir,
-                                                       'ramdisk'),
-                                          instance['ramdisk_id'],
-                                          instance['user_id'],
-                                          instance['project_id'])
+                image = self.image_backend.image(instance, 'ramdisk', 'raw')
+                fname = imagecache.get_cache_fname(disk_images, 'ramdisk_id')
+                image.cache(fetch_func=libvirt_utils.fetch_image,
+                                     context=context,
+                                     filename=fname,
+                                     image_id=disk_images['ramdisk_id'],
+                                     user_id=instance['user_id'],
+                                     project_id=instance['project_id'])
 
     def pre_live_migration(self, context, instance, block_device_info,
                            network_info, disk_info, migrate_data=None):
@@ -4294,7 +4302,7 @@ class LibvirtDriver(driver.ComputeDriver):
                             project_id=instance['project_id'],
                             size=info['virt_disk_size'])
 
-        # if image has kernel and ramdisk, just download
+        # if image has kernel and ramdisk, just fetch
         # following normal way.
         self._fetch_instance_kernel_ramdisk(context, instance)
 
