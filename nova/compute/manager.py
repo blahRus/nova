@@ -1093,10 +1093,10 @@ class ComputeManager(manager.SchedulerDependentManager):
     def _prep_block_device(self, context, instance, bdms):
         """Set up the block device for an instance with error logging."""
         try:
-            if CONF.always_use_volumes:
-                LOG.debug('creating bdm for local disks')
-                LOG.debug('instance = %s', instance)
-                LOG.debug('bdms = %s', bdms)
+            LOG.debug('instance = %s', instance)
+            LOG.debug('bdms = %s', bdms)
+            if CONF.always_use_volumes and not bdms:
+                LOG.debug('creating bdms for local disks')
                 self._replace_local_disks_with_volumes(context,
                                                        instance)
                 bdms = self.conductor_api.block_device_mapping_get_all_by_instance(context, instance)
