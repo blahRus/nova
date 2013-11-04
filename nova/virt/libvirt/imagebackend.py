@@ -35,15 +35,7 @@ from nova.virt.disk import api as disk
 from nova.virt import images
 from nova.virt.libvirt import config as vconfig
 from nova.virt.libvirt import utils as libvirt_utils
-
-
-try:
-    import rados
-    import rbd
-except ImportError:
-    rados = None
-    rbd = None
-
+from nova.virt.libvirt import rbd_utils
 
 __imagebackend_opts = [
     cfg.StrOpt('libvirt_images_type',
@@ -417,52 +409,7 @@ class Lvm(Image):
         libvirt_utils.execute(*cmd, run_as_root=True, attempts=3)
 
 
-class RBDVolumeProxy(object):
-    """Context manager for dealing with an existing rbd volume.
-
-    This handles connecting to rados and opening an ioctx automatically, and
-    otherwise acts like a librbd Image object.
-
-    The underlying librados client and ioctx can be accessed as the attributes
-    'client' and 'ioctx'.
-    """
-    def __init__(self, driver, name, pool=None):
-        client, ioctx = driver._connect_to_rados(pool)
-        try:
-            self.volume = driver.rbd.Image(ioctx, str(name), snapshot=None)
-        except driver.rbd.Error:
-            LOG.exception(_("error opening rbd image %s"), name)
-            driver._disconnect_from_rados(client, ioctx)
-            raise
-        self.driver = driver
-        self.client = client
-        self.ioctx = ioctx
-
-    def __enter__(self):
-        return self
-
-    def __exit__(self, type_, value, traceback):
-        try:
-            self.volume.close()
-        finally:
-            self.driver._disconnect_from_rados(self.client, self.ioctx)
-
-    def __getattr__(self, attrib):
-        return getattr(self.volume, attrib)
-
-
-def ascii_str(s):
-    """Convert a string to ascii, or return None if the input is None.
-
-    This is useful when a parameter is None by default, or a string. LibRBD
-    only accepts ascii, hence the need for conversion.
-    """
-    if s is None:
-        return s
-    return str(s)
-
-
-class Rbd(Image):
+class Rbd(Image, rbd_utils.RBDDriver):
     def __init__(self, instance=None, disk_name=None, path=None,
                  snapshot_name=None, **kwargs):
         super(Rbd, self).__init__("block", "rbd", is_block_dev=True)
@@ -478,29 +425,13 @@ class Rbd(Image):
             raise RuntimeError(_('You should specify'
                                  ' libvirt_images_rbd_pool'
                                  ' flag to use rbd images.'))
-        self.pool = CONF.libvirt_images_rbd_pool
-        self.ceph_conf = ascii_str(CONF.libvirt_images_rbd_ceph_conf)
-        self.rbd_user = ascii_str(CONF.rbd_user)
-        self.rbd = kwargs.get('rbd', rbd)
-        self.rados = kwargs.get('rados', rados)
-
-    def _connect_to_rados(self, pool=None):
-        client = self.rados.Rados(rados_id=self.rbd_user,
-                                  conffile=self.ceph_conf)
-        try:
-            client.connect()
-            pool_to_open = str(pool or self.pool)
-            ioctx = client.open_ioctx(pool_to_open)
-            return client, ioctx
-        except self.rados.Error:
-            # shutdown cannot raise an exception
-            client.shutdown()
-            raise
-
-    def _disconnect_from_rados(self, client, ioctx):
-        # closing an ioctx cannot raise an exception
-        ioctx.close()
-        client.shutdown()
+        self._configure(
+            pool=CONF.libvirt_images_rbd_pool,
+            ceph_conf=CONF.libvirt_images_rbd_ceph_conf,
+            rbd_user=CONF.rbd_user,
+            rbd_lib=kwargs.get('rbd'),
+            rados_lib=kwargs.get('rados'),
+            )
 
     def _supports_layering(self):
         return hasattr(self.rbd, 'RBD_FEATURE_LAYERING')
@@ -573,21 +504,9 @@ class Rbd(Image):
 
         return False
 
-    def _resize(self, volume_name, size):
-        size = int(size) * 1024
-
-        with RBDVolumeProxy(self, volume_name) as vol:
-            vol.resize(size)
-
     def create_image(self, prepare_template, base, size, *args, **kwargs):
         if self.rbd is None:
             raise RuntimeError(_('rbd python libraries not found'))
-
-        old_format = True
-        features = 0
-        if self._supports_layering():
-            old_format = False
-            features = self.rbd.RBD_FEATURE_LAYERING
 
         if not os.path.exists(base):
             prepare_template(target=base, *args, **kwargs)

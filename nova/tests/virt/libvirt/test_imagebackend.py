@@ -28,6 +28,7 @@ from nova import test
 from nova.tests import fake_processutils
 from nova.tests.virt.libvirt import fake_libvirt_utils
 from nova.virt.libvirt import imagebackend
+from nova.virt.libvirt import rbd_utils
 
 CONF = cfg.CONF
 
@@ -538,8 +539,8 @@ class RbdTestCase(_ImageTestCase, test.NoDBTestCase):
 
     def prepare_mocks(self):
         fn = self.mox.CreateMockAnything()
-        self.mox.StubOutWithMock(imagebackend, 'rbd')
-        self.mox.StubOutWithMock(imagebackend, 'rados')
+        self.mox.StubOutWithMock(rbd_utils, 'rbd')
+        self.mox.StubOutWithMock(rbd_utils, 'rados')
         return fn
 
     def test_cache(self):
@@ -635,8 +636,8 @@ class RbdTestCase(_ImageTestCase, test.NoDBTestCase):
 
         fake_processutils.fake_execute_clear_log()
         fake_processutils.stub_out_processutils_execute(self.stubs)
-        self.mox.StubOutWithMock(imagebackend, 'rbd')
-        self.mox.StubOutWithMock(imagebackend, 'rados')
+        self.mox.StubOutWithMock(rbd_utils, 'rbd')
+        self.mox.StubOutWithMock(rbd_utils, 'rados')
         image = self.image_class(self.INSTANCE, self.NAME)
 
         def fake_fetch(target, *args, **kwargs):
