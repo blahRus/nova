@@ -90,6 +90,9 @@ class Image(object):
         # are trying to create a base file at the same time
         self.lock_path = os.path.join(CONF.instances_path, 'locks')
 
+    def backend_name(self):
+        return None
+
     @abc.abstractmethod
     def create_image(self, prepare_template, base, size, *args, **kwargs):
         """Create image from template.
@@ -432,6 +435,9 @@ class Rbd(Image, rbd_utils.RBDDriver):
             rbd_lib=kwargs.get('rbd'),
             rados_lib=kwargs.get('rados'),
             )
+
+    def backend_name(self):
+        return self.pool, self.rbd_name
 
     def _supports_layering(self):
         return hasattr(self.rbd, 'RBD_FEATURE_LAYERING')

@@ -86,6 +86,28 @@ class ImageHandler(object):
                 self._associate(path, location)
             self._set_handled(ret)
 
+    def fetch_to_backend(self, context, image_id, path,
+                         user_id=None, project_id=None, location=None,
+                         backend_dest=None):
+        """Fetch an image from a location to local.
+
+        :param context: Request context
+        :param image_id: The opaque image identifier
+        :param path: The image data to write, as a file-like object
+        :param user_id: Request user id
+        :param project_id: Request project id
+        :param location: Image location to handling
+        :param backend_dest: where to store the image (backend-specific type)
+
+        :retval a boolean value to inform handling success or not
+        """
+        ret = self._fetch_image(context, image_id, path,
+                                user_id, project_id, location,
+                                backend_dest)
+        if ret:
+            self._associate(path, location)
+        self._set_handled(ret)
+
     def remove_image(self, path,
                      context=None, image_id=None,
                      user_id=None, project_id=None,

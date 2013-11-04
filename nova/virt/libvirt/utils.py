@@ -33,6 +33,7 @@ from nova.openstack.common import processutils
 from nova import unit
 from nova import utils
 from nova.virt import images
+from nova.virt.imagehandler import handle_image
 
 libvirt_opts = [
     cfg.BoolOpt('libvirt_snapshot_compression',
@@ -640,8 +641,18 @@ def get_fs_info(path):
             'used': used}
 
 
-def fetch_image(context, target, image_id, user_id, project_id):
+def fetch_image(context, target, image_id, user_id, project_id,
+                backend_dest=None):
     """Grab image."""
+    if backend_dest is not None:
+        for (handler, loc) in handle_image(context, image_id,
+                                           user_id, project_id, target,
+                                           backend_dest):
+            # The loop will stop when the handle function return success.
+            handler.fetch_to_backend(context, image_id, target,
+                                     user_id, project_id, loc,
+                                     backend_dest)
+        return
     images.fetch_to_raw(context, image_id, target, user_id, project_id)
 
 
