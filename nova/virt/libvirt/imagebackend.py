@@ -237,7 +237,7 @@ class Image(object):
     def snapshot_delete(self):
         raise NotImplementedError()
 
-    def direct_fetch(self, image_id, image_meta, image_locations):
+    def direct_fetch(self, image_id, image_meta, image_locations, max_size=0):
         """Create an image from a direct image location.
 
         :raises: exception.ImageUnacceptable if it cannot be fetched directly
@@ -721,7 +721,7 @@ class Rbd(Image):
                                      self.rbd_name,
                                      features=self.rbd.RBD_FEATURE_LAYERING)
 
-    def direct_fetch(self, image_id, image_meta, image_locations):
+    def direct_fetch(self, image_id, image_meta, image_locations, max_size=0):
         if self.check_image_exists():
             return
         if image_meta.get('disk_format') != 'raw':
